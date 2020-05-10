@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+	<style type="text/css">
+		body, html,#allmap {width: 100%;height: 98%;overflow: hidden;margin:0;font-family:"微软雅黑";}
+		#l-map{height:100%;width:78%;float:left;border-right:2px solid #bcbcbc;}
+		#r-result{height:100%;width:20%;float:left;}
+	</style>
+	<script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+	<script src="https://api.map.baidu.com/api?v=2.0&ak=WwRWeUUKOpxuf4kn34xBtkdyPFPrNRpn&s=1"></script>
+	<title>添加多个标注点</title>
+</head>
+<body>
+	<input id="lng" placeholder="经度"/>
+	<input id="lat" placeholder="纬度"/>
+	<input id="dis" placeholder="距离（单位公里）"/>
+	<a id="submit">查询</a>
+	<!-- <div id="next">下一页</div> -->
+
+	<div id="allmap"></div>
+</body>
+</html>
+<script type="text/javascript">
+	// 百度地图API功能
+	var map = new BMap.Map("allmap");
+	//var point = new BMap.Point(113.150410, 23.066911);
+  	// var point = new BMap.Point(113.16231024099005,23.070673003791736);
+    var PI= 3.14159265358979324;
+    var x_pi= 3.14159265358979324 * 3000.0 / 180.0;
+	
+
+	// gcj 转 badui
+	function bd_encrypt(gcjLat, gcjLon) {
+        var x = gcjLon, y = gcjLat;
+        var z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * this.x_pi);
+        var theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * this.x_pi);
+        var bdLon = z * Math.cos(theta) + 0.0065;
+        var bdLat = z * Math.sin(theta) + 0.006;
+        return { 'lat': bdLat, 'lng': bdLon };
+    }
+
+    //gps 转gcj
+ 	function gcj_encrypt(wgsLat, wgsLon) {
+        if (outOfChina(wgsLat, wgsLon))
+            return { 'lat': wgsLat, 'lon': wgsLon };
+
+        var d = delta(wgsLat, wgsLon);
+        return { 'lat': wgsLat + d.lat, 'lng': wgsLon + d.lon };
+    }
+
+	//BD-09 to GCJ-02
+    function bd_decrypt(bdLat, bdLon) {
+        var x = bdLon - 0.0065, y = bdLat - 0.006;  
+        var z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * this.x_pi);  
+        var theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * this.x_pi);  
+        var gcjLon = z * Math.cos(theta);  
+        var gcjLat = z * Math.sin(theta);
+        return {'lat' : gcjLat, 'lng' : gcjLon};
+    }
+    //GCJ-02 to WGS-84 exactly
+    function gcj_decrypt_exact(gcjLat, gcjLon) {
+        var initDelta = 0.01;
+        var threshold = 0.000000001;
+        var dLat = initDelta, dLon = initDelta;
+        var mLat = gcjLat - dLat, mLon = gcjLon - dLon;
+        var pLat = gcjLat + dLat, pLon = gcjLon + dLon;
+        var wgsLat, wgsLon, i = 0;
+        while (1) {
+            wgsLat = (mLat + pLat) / 2;
+            wgsLon = (mLon + pLon) / 2;
+            var tmp = this.gcj_encrypt(wgsLat, wgsLon)
+            dLat = tmp.lat - gcjLat;
+            dLon = tmp.lon - gcjLon;
+            if ((Math.abs(dLat) < threshold) && (Math.abs(dLon) < threshold))
+                break;
+ 
+            if (dLat > 0) pLat = wgsLat; else mLat = wgsLat;
+            if (dLon > 0) pLon = wgsLon; else mLon = wgsLon;
+ 
+            if (++i > 10000) break;
+        }
+        //console.log(i);
+        return {'lat': wgsLat, 'lng': wgsLon};
+    }
+	 function outOfChina(lat, lon) {
+        if (lon < 72.004 || lon > 137.8347)
+            return true;
+        if (lat < 0.8293 || lat > 55.8271)
+            return true;
+        return false;
+    }
+	function delta(lat, lon) {
+        // Krasovsky 1940
+        // a = 6378245.0, 1/f = 298.3
+        // b = a * (1 - f)
+        // ee = (a^2 - b^2) / a^2;
+        var a = 6378245.0;
+        var ee = 0.00669342162296594323;
+        var dLat = transformLat(lon - 105.0, lat - 35.0);
+        var dLon = transformLon(lon - 105.0, lat - 35.0);
+        var radLat = lat / 180.0 * this.PI;
+        var magic = Math.sin(radLat);
+        magic = 1 - ee * magic * magic;
+        var sqrtMagic = Math.sqrt(magic);
+        dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * this.PI);
+        dLon = (dLon * 180.0) / (a / sqrtMagic * Math.cos(radLat) * this.PI);
+        return { 'lat': dLat, 'lon': dLon };
+    }
+	function transformLat(x, y) {
+        var ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * this.PI) + 20.0 * Math.sin(2.0 * x * this.PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(y * this.PI) + 40.0 * Math.sin(y / 3.0 * this.PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(y / 12.0 * this.PI) + 320 * Math.sin(y * this.PI / 30.0)) * 2.0 / 3.0;
+        return ret;
+    }
+	function transformLon(x, y) {
+        var ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * this.PI) + 20.0 * Math.sin(2.0 * x * this.PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(x * this.PI) + 40.0 * Math.sin(x / 3.0 * this.PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(x / 12.0 * this.PI) + 300.0 * Math.sin(x / 30.0 * this.PI)) * 2.0 / 3.0;
+        return ret;
+    }
+
+
+// 北滘医院
+ //  	var lng = 113.211629;
+	// var lat = 22.933371;
+
+
+//佛山恒大雅苑
+ //  	var lng = 112.861961;
+	// var lat = 23.504851;
+
+
+//富力天寓
+
+
+	/*map.addEventListener("zoomstart", function(evt){　　
+		var cp = map.getCenter();
+
+		var point = new BMap.Point(cp.lng,cp.lat);
+		var marker = new BMap.Marker(point);  // 创建标注
+		var label = new BMap.Label("中心点",{offset:new BMap.Size(20,-10)});
+		marker.setLabel(label); //添加百度label
+		map.addOverlay(marker);  
+
+		// alert(cp.lng + "," + cp.lat);
+		lng=cp.lng;
+		lat=cp.lat;
+		//百度转原始
+		var gcj1=bd_decrypt(lat, lng);
+		var gps1=gcj_decrypt_exact(gcj1.lat, gcj1.lng); 
+		console.log('中心点：'+gps1.lng+","+gps1.lat);
+		getPoint(num,page,gps1.lng,gps1.lat);
+	});*/
+	var top_left_control = new BMap.ScaleControl({anchor: BMAP_ANCHOR_BOTTOM_LEFT});// 左上角，添加比例尺
+	map.addControl(top_left_control);
+	map.enableScrollWheelZoom();   //启用滚轮放大缩小，默认禁用
+	map.enableContinuousZoom();    //启用地图惯性拖拽，默认禁用
+	var opts = {
+		width : 400,     // 信息窗口宽度
+		height: 180,     // 信息窗口高度
+		title : "基站信息" , // 信息窗口标题
+		enableMessage:true//设置允许信息窗发送短息
+	   };
+
+	//后台查询坐标点数组，画出来
+	var page = 1000;
+	var num = 1;
+/*	$("#next").click(function(){
+		getPoint(num*page*1,page);
+		num ++;
+	})*/
+
+  	var lng = 113.211629;
+	var lat = 22.933371;
+
+
+	var gcj = gcj_encrypt(lat,lng);
+	var baidu = bd_encrypt(gcj.lat,gcj.lng);
+
+  	var point = new BMap.Point(baidu.lng,baidu.lat);
+
+	map.centerAndZoom(point, 15);
+
+	$('#submit').click(function(){
+
+		map.clearOverlays();
+		// var lng=+$('#lng').val();
+		// var lat=+$('#lat').val();
+
+		// var gcj = gcj_encrypt(lat,lng);
+		// var baidu = bd_encrypt(gcj.lat,gcj.lng);
+
+	 //  	var point = new BMap.Point(baidu.lng,baidu.lat);
+	 	var point = getBaiduPoint(+$('#lng').val(),+$('#lat').val());
+		map.centerAndZoom(point, 15);
+
+		var marker = new BMap.Marker(point);  // 创建标注
+		var label = new BMap.Label("中心点",{offset:new BMap.Size(20,-10)});
+		marker.setLabel(label); //添加百度label
+		map.addOverlay(marker);  
+		
+		var cp = map.getCenter();
+		lng=cp.lng;
+		lat=cp.lat;
+		//百度转原始
+		// var gcj1=bd_decrypt(lat, lng);
+		// var gps1=gcj_decrypt_exact(gcj1.lat, gcj1.lng); 
+		// console.log('中心点：'+gps1.lng+","+gps1.lat);
+		getPoint(num,page,+$('#lng').val(),+$('#lat').val(),$('#dis').val());
+	});
+
+	function getPoint(start,end,lng,lat,dis){
+		var url = "http://localhost:8088/getMapPoints?dis="+dis+"&longitude="+lng+"&latitude="+lat+"&start="+start+"&end="+end;
+		$.getJSON(url,function(result2){
+			var result = result2.list;
+		    $.each(result, function(i, obj){
+
+				// var gcj = gcj_encrypt(+obj.ne_cell_latitude,+obj.ne_cell_longitude);
+				// var baidu = bd_encrypt(gcj.lat,gcj.lng);
+			 //  	var point = new BMap.Point(baidu.lng,baidu.lat);
+			 	var point =  getBaiduPoint(+obj.ne_cell_longitude,+obj.ne_cell_latitude);
+		  		var marker = new BMap.Marker(point);  // 创建标注
+				map.addOverlay(marker);               // 将标注添加到地图中
+
+				var content ="第"+i+"个点,基站名字："+ obj.ne_cell_base_name+"<br>具体名字："+obj.ne_cell_community_name;
+				addClickHandler(content,marker);
+				// var labelgg = new BMap.Label(obj.ne_cell_base_name+"<br>"+obj.ne_cell_community_name,{offset:new BMap.Size(20,-10)});
+	   //  		marker.setLabel(labelgg); //添加GPS label
+		    });
+	    });
+	}
+
+	function getBaiduPoint(lng,lat){
+		var gcj = gcj_encrypt(lat,lng);
+		var baidu = bd_encrypt(gcj.lat,gcj.lng);
+	  	return new BMap.Point(baidu.lng,baidu.lat);
+	}
+	
+	
+	
+
+	function addClickHandler(content,marker){
+			marker.addEventListener("click",function(e){
+			openInfo(content,e)}
+		);
+	}
+	function openInfo(content,e){
+		var p = e.target;
+		var point = new BMap.Point(p.getPosition().lng, p.getPosition().lat);
+		var infoWindow = new BMap.InfoWindow(content,opts);  // 创建信息窗口对象 
+		map.openInfoWindow(infoWindow,point); //开启信息窗口
+	}
+
+
+
+
+
+</script>
